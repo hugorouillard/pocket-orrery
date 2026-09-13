@@ -9,15 +9,46 @@ pub enum BodyKind {
     Star,
     Rocky,
     GasGiant,
+    Moon,
 }
 
-/// A circular orbit around an earlier body in the system list.
+/// A mildly eccentric Kepler orbit around an earlier body in the system list.
 #[derive(Clone, Copy, Debug)]
 pub struct Orbit {
     pub parent: usize,
-    pub radius: f32,
+    pub semi_major_axis: f32,
+    pub eccentricity: f32,
+    pub argument: f32,
     pub period_days: f32,
     pub phase: f32,
+}
+
+impl Orbit {
+    /// Resolves a relative position by iterating Kepler's equation.
+    pub fn relative_position(&self, elapsed_days: f32) -> Vec2 {
+        let mean_anomaly = self.phase + TAU * elapsed_days / self.period_days;
+        let mut eccentric_anomaly = mean_anomaly;
+        for _ in 0..4 {
+            eccentric_anomaly -=
+                (eccentric_anomaly - self.eccentricity * eccentric_anomaly.sin() - mean_anomaly)
+                    / (1.0 - self.eccentricity * eccentric_anomaly.cos());
+        }
+
+        let local = vec2(
+            self.semi_major_axis * (eccentric_anomaly.cos() - self.eccentricity),
+            self.semi_major_axis
+                * (1.0 - self.eccentricity.powi(2)).sqrt()
+                * eccentric_anomaly.sin(),
+        );
+        rotate(local, self.argument)
+    }
+}
+
+/// A thin visual atmosphere with density controlling its apparent depth.
+#[derive(Clone, Copy, Debug)]
+pub struct Atmosphere {
+    pub color: Color,
+    pub density: f32,
 }
 
 /// A generated celestial body and its current simulation position.
@@ -26,7 +57,12 @@ pub struct Body {
     pub name: String,
     pub kind: BodyKind,
     pub radius: f32,
+    pub mass: f32,
     pub color: Color,
+    pub accent: Color,
+    pub atmosphere: Option<Atmosphere>,
+    pub terrain_seed: u64,
+    pub has_rings: bool,
     pub orbit: Option<Orbit>,
     pub position: Vec2,
 }
@@ -61,11 +97,17 @@ impl System {
     pub fn generate(settings: SystemSettings) -> Self {
         let mut random = Random::new(settings.seed);
         let star_radius = random.range(26.0, 36.0);
+        let star_mass = random.range(400.0, 560.0);
         let mut bodies = vec![Body {
             name: "Solis".to_owned(),
             kind: BodyKind::Star,
             radius: star_radius,
+            mass: star_mass,
             color: Color::new(1.0, 0.78, 0.28, 1.0),
+            accent: Color::new(1.0, 0.94, 0.64, 1.0),
+            atmosphere: None,
+            terrain_seed: random.next_u64(),
+            has_rings: false,
             orbit: None,
             position: Vec2::ZERO,
         }];
@@ -80,23 +122,76 @@ impl System {
             let radius = match kind {
                 BodyKind::GasGiant => random.range(16.0, 24.0),
                 BodyKind::Rocky => random.range(8.0, 14.0),
-                BodyKind::Star => unreachable!(),
+                BodyKind::Star | BodyKind::Moon => unreachable!(),
+            };
+            let mass = match kind {
+                BodyKind::GasGiant => radius.powi(2) * random.range(0.1, 0.16),
+                BodyKind::Rocky => radius.powi(3) * random.range(0.0025, 0.0045),
+                BodyKind::Star | BodyKind::Moon => unreachable!(),
             };
             orbital_radius += random.range(52.0, 76.0) * settings.spacing + radius;
-            let period_days = orbital_period(orbital_radius, 34.0);
+            let period_days = orbital_period(orbital_radius, star_mass);
+            let planet_name = format!("{}-{}", syllable(&mut random), index + 1);
+            let color = body_color(kind, &mut random);
+            let atmosphere = generate_atmosphere(kind, &mut random);
+            let planet_index = bodies.len();
             bodies.push(Body {
-                name: format!("{}-{}", syllable(&mut random), index + 1),
+                name: planet_name.clone(),
                 kind,
                 radius,
-                color: body_color(kind, &mut random),
+                mass,
+                color,
+                accent: vary_color(color, random.range(0.75, 1.25)),
+                atmosphere,
+                terrain_seed: random.next_u64(),
+                has_rings: kind == BodyKind::GasGiant && random.chance(0.36),
                 orbit: Some(Orbit {
                     parent: 0,
-                    radius: orbital_radius,
+                    semi_major_axis: orbital_radius,
+                    eccentricity: random.range(0.0, 0.16),
+                    argument: random.range(0.0, TAU),
                     period_days,
                     phase: random.range(0.0, TAU),
                 }),
                 position: Vec2::ZERO,
             });
+
+            let hill_radius = orbital_radius * (mass / (3.0 * star_mass)).cbrt();
+            let moon_limit = if kind == BodyKind::GasGiant { 3 } else { 2 };
+            let moon_count = random.index(moon_limit + 1);
+            let mut moon_axis = radius + random.range(10.0, 15.0);
+            for moon_index in 0..moon_count {
+                if moon_axis + 6.0 >= hill_radius * 0.72 {
+                    break;
+                }
+                let moon_radius = random.range(3.2, (radius * 0.38).max(4.0));
+                let moon_color = body_color(BodyKind::Moon, &mut random);
+                bodies.push(Body {
+                    name: format!("{} {}", planet_name, roman_numeral(moon_index)),
+                    kind: BodyKind::Moon,
+                    radius: moon_radius,
+                    mass: moon_radius.powi(3) * 0.003,
+                    color: moon_color,
+                    accent: vary_color(moon_color, 0.72),
+                    atmosphere: if moon_radius > 4.5 && random.chance(0.15) {
+                        generate_atmosphere(BodyKind::Rocky, &mut random)
+                    } else {
+                        None
+                    },
+                    terrain_seed: random.next_u64(),
+                    has_rings: false,
+                    orbit: Some(Orbit {
+                        parent: planet_index,
+                        semi_major_axis: moon_axis,
+                        eccentricity: random.range(0.0, 0.08),
+                        argument: random.range(0.0, TAU),
+                        period_days: orbital_period(moon_axis, mass),
+                        phase: random.range(0.0, TAU),
+                    }),
+                    position: Vec2::ZERO,
+                });
+                moon_axis += moon_radius + random.range(10.0, 16.0);
+            }
         }
 
         let mut system = Self {
@@ -121,16 +216,16 @@ impl System {
                 continue;
             };
             let parent_position = self.bodies[orbit.parent].position;
-            let angle = orbit.phase + TAU * self.elapsed_days / orbit.period_days;
             self.bodies[index].position =
-                parent_position + vec2(angle.cos(), angle.sin()) * orbit.radius;
+                parent_position + orbit.relative_position(self.elapsed_days);
         }
     }
 }
 
 /// Uses Kepler's third-law relationship with a compressed gravitational scale.
-fn orbital_period(radius: f32, gravitational_parameter: f32) -> f32 {
-    TAU * (radius.powi(3) / gravitational_parameter).sqrt()
+fn orbital_period(radius: f32, parent_mass: f32) -> f32 {
+    const TOY_GRAVITY: f32 = 40.0;
+    TAU * (radius.powi(3) / (TOY_GRAVITY * parent_mass)).sqrt()
 }
 
 /// Chooses a legible procedural palette for a body category.
@@ -148,8 +243,49 @@ fn body_color(kind: BodyKind, random: &mut Random) -> Color {
             random.range(0.42, 0.68),
             1.0,
         ),
+        BodyKind::Moon => {
+            let value = random.range(0.38, 0.68);
+            Color::new(value * 1.04, value, value * 0.92, 1.0)
+        }
         BodyKind::Star => Color::new(1.0, 0.78, 0.28, 1.0),
     }
+}
+
+/// Optionally gives rocky worlds air and always gives giants deep clouds.
+fn generate_atmosphere(kind: BodyKind, random: &mut Random) -> Option<Atmosphere> {
+    if kind == BodyKind::Rocky && !random.chance(0.58) {
+        return None;
+    }
+    let color = if random.chance(0.65) {
+        Color::new(0.28, 0.68, 0.96, 1.0)
+    } else {
+        Color::new(0.92, 0.58, 0.28, 1.0)
+    };
+    Some(Atmosphere {
+        color,
+        density: random.range(0.35, 1.0),
+    })
+}
+
+/// Scales RGB channels while preserving a fully opaque color.
+fn vary_color(color: Color, amount: f32) -> Color {
+    Color::new(
+        (color.r * amount).min(1.0),
+        (color.g * amount).min(1.0),
+        (color.b * amount).min(1.0),
+        1.0,
+    )
+}
+
+/// Rotates a vector without coupling the simulation to a scene transform.
+fn rotate(point: Vec2, angle: f32) -> Vec2 {
+    let (sin, cos) = angle.sin_cos();
+    vec2(point.x * cos - point.y * sin, point.x * sin + point.y * cos)
+}
+
+/// Names the small generated moon sets without carrying a formatter.
+fn roman_numeral(index: usize) -> &'static str {
+    ["I", "II", "III"][index]
 }
 
 /// Produces a short pronounceable fragment for generated labels.
