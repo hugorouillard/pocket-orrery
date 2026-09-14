@@ -1,9 +1,12 @@
 //! Pocket Orrery's application loop and immediate-mode renderer.
 
+mod flight;
 mod simulation;
 
+use flight::{Controls, SHIP_RADIUS, Ship};
 use macroquad::prelude::*;
 use simulation::{BodyKind, System, SystemSettings};
+use std::collections::VecDeque;
 
 const BACKGROUND: Color = Color::new(0.025, 0.035, 0.075, 1.0);
 
@@ -19,25 +22,29 @@ impl View {
         (point - self.center) * self.zoom + vec2(screen_width(), screen_height()) * 0.5
     }
 
-    /// Applies mouse-wheel zoom while keeping the view within useful limits.
-    fn update(&mut self) {
+    /// Follows the ship smoothly and applies bounded mouse-wheel zoom.
+    fn update(&mut self, target: Vec2) {
         let (_, wheel) = mouse_wheel();
         if wheel != 0.0 {
-            self.zoom = (self.zoom * 1.18_f32.powf(wheel)).clamp(0.12, 8.0);
+            self.zoom = (self.zoom * 1.18_f32.powf(wheel)).clamp(0.1, 8.0);
         }
-
-        let mut direction = Vec2::ZERO;
-        direction.x = axis(is_key_down(KeyCode::D), is_key_down(KeyCode::A));
-        direction.y = axis(is_key_down(KeyCode::S), is_key_down(KeyCode::W));
-        if direction.length_squared() > 0.0 {
-            self.center += direction.normalize() * 320.0 * get_frame_time() / self.zoom;
-        }
+        let follow = 1.0 - (-6.0 * get_frame_time()).exp();
+        self.center = self.center.lerp(target, follow);
     }
 }
 
 /// Returns a signed input axis from positive and negative buttons.
 fn axis(positive: bool, negative: bool) -> f32 {
     i8::from(positive) as f32 - i8::from(negative) as f32
+}
+
+/// Reads keyboard input into a frame-independent pilot command.
+fn pilot_controls() -> Controls {
+    Controls {
+        thrust: axis(is_key_down(KeyCode::W), is_key_down(KeyCode::S)),
+        turn: axis(is_key_down(KeyCode::D), is_key_down(KeyCode::A)),
+        brake: is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift),
+    }
 }
 
 /// Draws orbit guides behind the system bodies.
@@ -156,6 +163,45 @@ fn hash_unit(state: &mut u64) -> f32 {
     ((value ^ (value >> 31)) >> 40) as f32 / (1_u64 << 24) as f32
 }
 
+/// Draws a fading inertial trail and a heading-oriented triangular craft.
+fn draw_ship(ship: &Ship, trail: &VecDeque<Vec2>, view: &View) {
+    let mut previous: Option<Vec2> = None;
+    for (index, point) in trail.iter().enumerate() {
+        let screen = view.world_to_screen(*point);
+        if let Some(from) = previous {
+            let alpha = index as f32 / trail.len().max(1) as f32 * 0.42;
+            draw_line(
+                from.x,
+                from.y,
+                screen.x,
+                screen.y,
+                1.5,
+                Color::new(0.3, 0.85, 1.0, alpha),
+            );
+        }
+        previous = Some(screen);
+    }
+
+    let center = view.world_to_screen(ship.position);
+    let size = (SHIP_RADIUS * view.zoom).clamp(6.0, 16.0);
+    let forward = vec2(ship.heading.cos(), ship.heading.sin());
+    let side = vec2(-forward.y, forward.x);
+    draw_triangle(
+        center + forward * size,
+        center - forward * size * 0.7 + side * size * 0.62,
+        center - forward * size * 0.7 - side * size * 0.62,
+        Color::new(0.86, 0.95, 1.0, 1.0),
+    );
+    if is_key_down(KeyCode::W) {
+        draw_triangle(
+            center - forward * size * 1.35,
+            center - forward * size * 0.65 + side * size * 0.3,
+            center - forward * size * 0.65 - side * size * 0.3,
+            ORANGE,
+        );
+    }
+}
+
 /// Configures a resizable antialiased desktop window.
 fn window_conf() -> Conf {
     Conf {
@@ -173,10 +219,12 @@ fn window_conf() -> Conf {
 async fn main() {
     let mut settings = SystemSettings::default();
     let mut system = System::generate(settings);
+    let mut ship = Ship::launch(&system);
     let mut view = View {
-        center: Vec2::ZERO,
-        zoom: 0.75,
+        center: ship.position,
+        zoom: 1.5,
     };
+    let mut trail: VecDeque<Vec2> = VecDeque::with_capacity(100);
     let mut paused = false;
 
     loop {
@@ -188,16 +236,31 @@ async fn main() {
         if is_key_pressed(KeyCode::R) {
             settings.seed = settings.seed.wrapping_add(1);
             system = System::generate(settings);
+            ship = Ship::launch(&system);
+            trail.clear();
         }
-        view.update();
         if !paused {
-            system.advance(get_frame_time());
+            let delta = get_frame_time();
+            system.advance(delta);
+            ship.update(&system, pilot_controls(), delta);
+            if trail
+                .back()
+                .is_none_or(|point| point.distance(ship.position) > 2.0)
+            {
+                if trail.len() == trail.capacity() {
+                    trail.pop_front();
+                }
+                trail.push_back(ship.position);
+            }
         }
+        view.update(ship.position);
 
         draw_orbits(&system, &view);
         draw_bodies(&system, &view);
+        draw_ship(&ship, &trail, &view);
+        let (nearest_index, altitude) = ship.nearest_body(&system);
         draw_text(
-            "WASD pan  |  wheel zoom  |  Space pause  |  R regenerate",
+            "W/S thrust  A/D turn  Shift brake  |  wheel zoom  Space pause  R regenerate",
             22.0,
             screen_height() - 24.0,
             20.0,
@@ -205,8 +268,12 @@ async fn main() {
         );
         draw_text(
             format!(
-                "SEED {:08X}   DAY {:.1}",
-                settings.seed, system.elapsed_days
+                "SEED {:08X}   DAY {:.1}   SPEED {:>5.1}   {} +{:.0}",
+                settings.seed,
+                system.elapsed_days,
+                ship.velocity.length(),
+                system.bodies[nearest_index].name,
+                altitude.max(0.0),
             ),
             22.0,
             34.0,

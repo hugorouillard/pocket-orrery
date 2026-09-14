@@ -3,6 +3,9 @@
 use macroquad::prelude::{Color, Vec2, vec2};
 use std::f32::consts::TAU;
 
+/// Simulation days advanced for each real-time second.
+pub const DAYS_PER_SECOND: f32 = 3.0;
+
 /// High-level categories used by generation and rendering.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BodyKind {
@@ -204,8 +207,20 @@ impl System {
 
     /// Advances the clock at a deliberately brisk exploration-friendly rate.
     pub fn advance(&mut self, real_seconds: f32) {
-        self.elapsed_days += real_seconds * 8.0;
+        self.elapsed_days += real_seconds * DAYS_PER_SECOND;
         self.update_positions();
+    }
+
+    /// Estimates a body's world-space velocity in simulation units per day.
+    pub fn velocity_per_day(&self, index: usize) -> Vec2 {
+        let Some(orbit) = self.bodies[index].orbit else {
+            return Vec2::ZERO;
+        };
+        const SAMPLE_DAYS: f32 = 0.01;
+        let local_velocity = (orbit.relative_position(self.elapsed_days + SAMPLE_DAYS)
+            - orbit.relative_position(self.elapsed_days - SAMPLE_DAYS))
+            / (2.0 * SAMPLE_DAYS);
+        self.velocity_per_day(orbit.parent) + local_velocity
     }
 
     /// Resolves body positions in parent-before-child order.
