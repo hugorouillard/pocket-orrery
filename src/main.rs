@@ -2,11 +2,13 @@
 
 mod flight;
 mod simulation;
+mod workbench;
 
 use flight::{Controls, SHIP_RADIUS, Ship};
 use macroquad::prelude::*;
 use simulation::{BodyKind, System, SystemSettings};
 use std::collections::VecDeque;
+use workbench::Workbench;
 
 const BACKGROUND: Color = Color::new(0.025, 0.035, 0.075, 1.0);
 
@@ -220,6 +222,7 @@ async fn main() {
     let mut settings = SystemSettings::default();
     let mut system = System::generate(settings);
     let mut ship = Ship::launch(&system);
+    let mut workbench = Workbench::new(settings);
     let mut view = View {
         center: ship.position,
         zoom: 1.5,
@@ -232,12 +235,6 @@ async fn main() {
 
         if is_key_pressed(KeyCode::Space) {
             paused = !paused;
-        }
-        if is_key_pressed(KeyCode::R) {
-            settings.seed = settings.seed.wrapping_add(1);
-            system = System::generate(settings);
-            ship = Ship::launch(&system);
-            trail.clear();
         }
         if !paused {
             let delta = get_frame_time();
@@ -260,7 +257,7 @@ async fn main() {
         draw_ship(&ship, &trail, &view);
         let (nearest_index, altitude) = ship.nearest_body(&system);
         draw_text(
-            "W/S thrust  A/D turn  Shift brake  |  wheel zoom  Space pause  R regenerate",
+            "W/S thrust  A/D turn  Shift brake  |  wheel zoom  Space pause  R new seed",
             22.0,
             screen_height() - 24.0,
             20.0,
@@ -280,6 +277,19 @@ async fn main() {
             20.0,
             WHITE,
         );
+
+        let requested_settings = if is_key_pressed(KeyCode::R) {
+            Some(workbench.settings(settings.seed.wrapping_add(0x9E37_79B9)))
+        } else {
+            workbench.draw(settings)
+        };
+        if let Some(next_settings) = requested_settings {
+            settings = next_settings;
+            system = System::generate(settings);
+            ship = Ship::launch(&system);
+            view.center = ship.position;
+            trail.clear();
+        }
 
         next_frame().await;
     }

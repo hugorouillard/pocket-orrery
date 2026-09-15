@@ -76,6 +76,8 @@ pub struct SystemSettings {
     pub seed: u64,
     pub planet_count: usize,
     pub spacing: f32,
+    pub eccentricity: f32,
+    pub moon_abundance: f32,
 }
 
 impl Default for SystemSettings {
@@ -85,6 +87,8 @@ impl Default for SystemSettings {
             seed: 0x5EED_CAFE,
             planet_count: 5,
             spacing: 1.0,
+            eccentricity: 0.16,
+            moon_abundance: 0.65,
         }
     }
 }
@@ -151,7 +155,7 @@ impl System {
                 orbit: Some(Orbit {
                     parent: 0,
                     semi_major_axis: orbital_radius,
-                    eccentricity: random.range(0.0, 0.16),
+                    eccentricity: random.range(0.0, settings.eccentricity),
                     argument: random.range(0.0, TAU),
                     period_days,
                     phase: random.range(0.0, TAU),
@@ -160,8 +164,13 @@ impl System {
             });
 
             let hill_radius = orbital_radius * (mass / (3.0 * star_mass)).cbrt();
-            let moon_limit = if kind == BodyKind::GasGiant { 3 } else { 2 };
-            let moon_count = random.index(moon_limit + 1);
+            let natural_moon_limit = if kind == BodyKind::GasGiant { 3 } else { 2 };
+            let moon_limit = (natural_moon_limit as f32 * settings.moon_abundance).round() as usize;
+            let moon_count = if moon_limit == 0 {
+                0
+            } else {
+                random.index(moon_limit + 1)
+            };
             let mut moon_axis = radius + random.range(10.0, 15.0);
             for moon_index in 0..moon_count {
                 if moon_axis + 6.0 >= hill_radius * 0.72 {
@@ -386,5 +395,31 @@ mod tests {
         system.update_positions();
 
         assert!(start.distance(system.bodies[1].position) < 0.001);
+    }
+
+    /// Tunable generation must honor planet count and preserve hierarchy order.
+    #[test]
+    fn generation_honors_structural_settings() {
+        let settings = SystemSettings {
+            planet_count: 8,
+            eccentricity: 0.05,
+            moon_abundance: 0.0,
+            ..SystemSettings::default()
+        };
+        let system = System::generate(settings);
+        let planet_count = system
+            .bodies
+            .iter()
+            .filter(|body| matches!(body.kind, BodyKind::Rocky | BodyKind::GasGiant))
+            .count();
+
+        assert_eq!(planet_count, 8);
+        assert!(!system.bodies.iter().any(|body| body.kind == BodyKind::Moon));
+        for (index, body) in system.bodies.iter().enumerate() {
+            if let Some(orbit) = body.orbit {
+                assert!(orbit.parent < index);
+                assert!(orbit.eccentricity <= settings.eccentricity);
+            }
+        }
     }
 }
