@@ -29,9 +29,10 @@ The app requires a graphical Linux, macOS, or Windows session supported by Macro
 | `W` / `S` | Forward / reverse thrust |
 | `A` / `D` | Turn left / right |
 | `Shift` | Inertial brake |
+| Hold `Space` | Match the selected world's velocity |
 | Mouse wheel | Zoom |
 | `Tab` | Select the next world |
-| `Space` | Pause simulation |
+| `P` | Pause simulation |
 | `R` | Generate the next seeded system |
 
 The workbench can rebuild the current seed after tuning parameters, making one-variable comparisons easy.

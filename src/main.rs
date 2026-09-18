@@ -6,7 +6,7 @@ mod workbench;
 
 use flight::{Controls, SHIP_RADIUS, Ship};
 use macroquad::prelude::*;
-use simulation::{BodyKind, System, SystemSettings};
+use simulation::{BodyKind, DAYS_PER_SECOND, System, SystemSettings};
 use std::collections::VecDeque;
 use workbench::Workbench;
 
@@ -60,12 +60,14 @@ fn draw_starfield(view: &View, seed: u64) {
     }
 }
 
-/// Reads keyboard input into a frame-independent pilot command.
-fn pilot_controls() -> Controls {
+/// Reads keyboard input and the selected body's velocity into a pilot command.
+fn pilot_controls(system: &System, target_index: usize) -> Controls {
     Controls {
         thrust: axis(is_key_down(KeyCode::W), is_key_down(KeyCode::S)),
         turn: axis(is_key_down(KeyCode::D), is_key_down(KeyCode::A)),
         brake: is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift),
+        match_velocity: is_key_down(KeyCode::Space)
+            .then(|| system.velocity_per_day(target_index) * DAYS_PER_SECOND),
     }
 }
 
@@ -234,7 +236,13 @@ fn draw_ship(ship: &Ship, trail: &VecDeque<Vec2>, view: &View) {
 }
 
 /// Marks the selected world directly or at the screen edge when it is distant.
-fn draw_navigation(system: &System, ship: &Ship, target_index: usize, view: &View) {
+fn draw_navigation(
+    system: &System,
+    ship: &Ship,
+    target_index: usize,
+    view: &View,
+    matching_velocity: bool,
+) {
     let target = &system.bodies[target_index];
     let target_screen = view.world_to_screen(target.position);
     let margin = 34.0;
@@ -276,8 +284,17 @@ fn draw_navigation(system: &System, ship: &Ship, target_index: usize, view: &Vie
     }
 
     let distance = ship.position.distance(target.position) - target.radius;
+    let target_velocity = system.velocity_per_day(target_index) * DAYS_PER_SECOND;
+    let relative_speed = ship.velocity.distance(target_velocity);
+    let match_status = if matching_velocity { "   MATCHING" } else { "" };
     draw_text(
-        format!("TARGET  {}   RANGE {:.0}", target.name, distance.max(0.0)),
+        format!(
+            "TARGET  {}   RANGE {:.0}   REL {:.1}{}",
+            target.name,
+            distance.max(0.0),
+            relative_speed,
+            match_status,
+        ),
         22.0,
         62.0,
         18.0,
@@ -316,7 +333,7 @@ async fn main() {
         clear_background(BACKGROUND);
         draw_starfield(&view, settings.seed);
 
-        if is_key_pressed(KeyCode::Space) {
+        if is_key_pressed(KeyCode::P) {
             paused = !paused;
         }
         if is_key_pressed(KeyCode::Tab) {
@@ -325,7 +342,7 @@ async fn main() {
         if !paused {
             let delta = get_frame_time();
             system.advance(delta);
-            ship.update(&system, pilot_controls(), delta);
+            ship.update(&system, pilot_controls(&system, target_index), delta);
             if trail
                 .back()
                 .is_none_or(|point| point.distance(ship.position) > 2.0)
@@ -341,10 +358,16 @@ async fn main() {
         draw_orbits(&system, &view);
         draw_bodies(&system, &view);
         draw_ship(&ship, &trail, &view);
-        draw_navigation(&system, &ship, target_index, &view);
+        draw_navigation(
+            &system,
+            &ship,
+            target_index,
+            &view,
+            is_key_down(KeyCode::Space),
+        );
         let (nearest_index, altitude) = ship.nearest_body(&system);
         draw_text(
-            "W/S thrust  A/D turn  Shift brake  |  wheel zoom  Tab target  Space pause  R new seed",
+            "W/S thrust  A/D turn  Space match target  Shift brake  |  wheel zoom  Tab target  P pause  R new seed",
             22.0,
             screen_height() - 24.0,
             20.0,
