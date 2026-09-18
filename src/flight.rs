@@ -7,6 +7,7 @@ pub const SHIP_RADIUS: f32 = 3.0;
 const THRUST: f32 = 42.0;
 const TURN_RATE: f32 = 2.7;
 const GRAVITY: f32 = 360.0;
+const MATCH_ACCELERATION: f32 = 64.0;
 const MAX_SPEED: f32 = 240.0;
 
 /// Per-frame pilot intent, separated from keyboard handling for testability.
@@ -15,6 +16,7 @@ pub struct Controls {
     pub thrust: f32,
     pub turn: f32,
     pub brake: bool,
+    pub match_velocity: Option<Vec2>,
 }
 
 /// The player's inertial state in the same world space as celestial bodies.
@@ -53,6 +55,10 @@ impl Ship {
 
         if controls.brake {
             self.velocity *= (-2.4 * dt).exp();
+        }
+        if let Some(target_velocity) = controls.match_velocity {
+            let correction = target_velocity - self.velocity;
+            self.velocity += correction.clamp_length_max(MATCH_ACCELERATION * dt);
         }
         self.velocity = self.velocity.clamp_length_max(MAX_SPEED);
         self.position += self.velocity * dt;
@@ -143,5 +149,28 @@ mod tests {
         ship.resolve_collisions(&system);
 
         assert!(ship.position.distance(body.position) >= body.radius + SHIP_RADIUS - f32::EPSILON);
+    }
+
+    /// Velocity matching should steadily reduce speed relative to its target.
+    #[test]
+    fn velocity_matching_reduces_relative_speed() {
+        let system = System::generate(SystemSettings::default());
+        let target_velocity = vec2(18.0, -7.0);
+        let mut ship = Ship {
+            position: vec2(10_000.0, 10_000.0),
+            velocity: vec2(-24.0, 12.0),
+            heading: 0.0,
+        };
+        let initial_error = ship.velocity.distance(target_velocity);
+        ship.update(
+            &system,
+            Controls {
+                match_velocity: Some(target_velocity),
+                ..Controls::default()
+            },
+            0.05,
+        );
+
+        assert!(ship.velocity.distance(target_velocity) < initial_error);
     }
 }
