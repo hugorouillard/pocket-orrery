@@ -11,6 +11,9 @@ use std::collections::VecDeque;
 use workbench::Workbench;
 
 const BACKGROUND: Color = Color::new(0.025, 0.035, 0.075, 1.0);
+const ACCELERATION_COLOR: Color = Color::new(1.0, 0.62, 0.24, 0.95);
+const TRAIL_CAPACITY: usize = 36;
+const TRAIL_SAMPLE_SECONDS: f32 = 0.08;
 
 /// Camera state measured in simulation units and pixels per unit.
 struct View {
@@ -40,6 +43,11 @@ fn axis(positive: bool, negative: bool) -> f32 {
     i8::from(positive) as f32 - i8::from(negative) as f32
 }
 
+/// Combines four buttons into a constant-strength eight-direction vector.
+fn directional_input(up: bool, down: bool, right: bool, left: bool) -> Vec2 {
+    vec2(axis(right, left), axis(down, up)).normalize_or_zero()
+}
+
 /// Draws a seed-stable star field with subtle camera parallax.
 fn draw_starfield(view: &View, seed: u64) {
     let drift = view.center * -0.035;
@@ -63,8 +71,12 @@ fn draw_starfield(view: &View, seed: u64) {
 /// Reads keyboard input and the selected body's velocity into a pilot command.
 fn pilot_controls(system: &System, target_index: usize) -> Controls {
     Controls {
-        thrust: axis(is_key_down(KeyCode::W), is_key_down(KeyCode::S)),
-        turn: axis(is_key_down(KeyCode::D), is_key_down(KeyCode::A)),
+        thrust_direction: directional_input(
+            is_key_down(KeyCode::W),
+            is_key_down(KeyCode::S),
+            is_key_down(KeyCode::D),
+            is_key_down(KeyCode::A),
+        ),
         brake: is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift),
         match_velocity: is_key_down(KeyCode::Space)
             .then(|| system.velocity_per_day(target_index) * DAYS_PER_SECOND),
@@ -187,45 +199,59 @@ fn hash_unit(state: &mut u64) -> f32 {
     ((value ^ (value >> 31)) >> 40) as f32 / (1_u64 << 24) as f32
 }
 
-/// Draws a fading inertial trail and a heading-oriented triangular craft.
-fn draw_ship(ship: &Ship, trail: &VecDeque<Vec2>, view: &View) {
-    let mut previous: Option<Vec2> = None;
+/// Draws timed breadcrumbs, acceleration afterimages, and the triangular craft.
+fn draw_ship(
+    ship: &Ship,
+    trail: &VecDeque<Vec2>,
+    view: &View,
+    thrust_direction: Vec2,
+    visual_acceleration: Vec2,
+) {
     for (index, point) in trail.iter().enumerate() {
         let screen = view.world_to_screen(*point);
-        if let Some(from) = previous {
-            let alpha = index as f32 / trail.len().max(1) as f32 * 0.42;
-            draw_line(
-                from.x,
-                from.y,
-                screen.x,
-                screen.y,
-                1.5,
-                Color::new(0.3, 0.85, 1.0, alpha),
-            );
-        }
-        previous = Some(screen);
+        let progress = (index + 1) as f32 / trail.len().max(1) as f32;
+        let alpha = progress.powf(1.7) * 0.62;
+        let radius = 0.7 + progress * 1.5;
+        draw_circle(
+            screen.x,
+            screen.y,
+            radius,
+            Color::new(0.3, 0.85, 1.0, alpha),
+        );
     }
 
     let center = view.world_to_screen(ship.position);
-    let velocity_tip = view.world_to_screen(ship.position + ship.velocity * 0.45);
-    draw_line(
-        center.x,
-        center.y,
-        velocity_tip.x,
-        velocity_tip.y,
-        1.0,
-        Color::new(0.35, 0.82, 1.0, 0.45),
-    );
     let size = (SHIP_RADIUS * view.zoom).clamp(6.0, 16.0);
     let forward = vec2(ship.heading.cos(), ship.heading.sin());
     let side = vec2(-forward.y, forward.x);
+    let acceleration_strength = (visual_acceleration.length() / 48.0).clamp(0.0, 1.0);
+    if acceleration_strength > 0.01 {
+        let wake_direction = -visual_acceleration.normalize_or_zero();
+        let wake_reach = size * 0.4 + acceleration_strength * 24.0;
+        for step in (1..=4).rev() {
+            let progress = step as f32 / 4.0;
+            let ghost_center = center + wake_direction * (size * 0.35 + wake_reach * progress);
+            let ghost_color = Color::new(
+                ACCELERATION_COLOR.r,
+                ACCELERATION_COLOR.g,
+                ACCELERATION_COLOR.b,
+                acceleration_strength * 0.16 * (1.15 - progress),
+            );
+            draw_triangle(
+                ghost_center + forward * size,
+                ghost_center - forward * size * 0.7 + side * size * 0.62,
+                ghost_center - forward * size * 0.7 - side * size * 0.62,
+                ghost_color,
+            );
+        }
+    }
     draw_triangle(
         center + forward * size,
         center - forward * size * 0.7 + side * size * 0.62,
         center - forward * size * 0.7 - side * size * 0.62,
         Color::new(0.86, 0.95, 1.0, 1.0),
     );
-    if is_key_down(KeyCode::W) {
+    if thrust_direction != Vec2::ZERO {
         draw_triangle(
             center - forward * size * 1.35,
             center - forward * size * 0.65 + side * size * 0.3,
@@ -325,7 +351,10 @@ async fn main() {
         center: ship.position,
         zoom: 1.5,
     };
-    let mut trail: VecDeque<Vec2> = VecDeque::with_capacity(100);
+    let mut trail: VecDeque<Vec2> = VecDeque::with_capacity(TRAIL_CAPACITY);
+    trail.push_back(ship.position);
+    let mut trail_sample_elapsed = 0.0;
+    let mut visual_acceleration = Vec2::ZERO;
     let mut paused = false;
     let mut target_index = usize::from(system.bodies.len() > 1);
 
@@ -339,14 +368,18 @@ async fn main() {
         if is_key_pressed(KeyCode::Tab) {
             target_index = (target_index + 1) % system.bodies.len();
         }
+        let delta = get_frame_time();
         if !paused {
-            let delta = get_frame_time();
             system.advance(delta);
-            ship.update(&system, pilot_controls(&system, target_index), delta);
-            if trail
-                .back()
-                .is_none_or(|point| point.distance(ship.position) > 2.0)
-            {
+        }
+        let controls = pilot_controls(&system, target_index);
+        if !paused {
+            ship.update(&system, controls, delta);
+            let feedback_response = 1.0 - (-12.0 * delta.min(0.05)).exp();
+            visual_acceleration = visual_acceleration.lerp(ship.acceleration, feedback_response);
+            trail_sample_elapsed += delta;
+            if trail_sample_elapsed >= TRAIL_SAMPLE_SECONDS {
+                trail_sample_elapsed %= TRAIL_SAMPLE_SECONDS;
                 if trail.len() == trail.capacity() {
                     trail.pop_front();
                 }
@@ -357,7 +390,13 @@ async fn main() {
 
         draw_orbits(&system, &view);
         draw_bodies(&system, &view);
-        draw_ship(&ship, &trail, &view);
+        draw_ship(
+            &ship,
+            &trail,
+            &view,
+            controls.thrust_direction,
+            visual_acceleration,
+        );
         draw_navigation(
             &system,
             &ship,
@@ -367,7 +406,7 @@ async fn main() {
         );
         let (nearest_index, altitude) = ship.nearest_body(&system);
         draw_text(
-            "W/S thrust  A/D turn  Space match target  Shift brake  |  wheel zoom  Tab target  P pause  R new seed",
+            "WASD thrust  Space match target  Shift brake  |  wheel zoom  Tab target  P pause  R new seed",
             22.0,
             screen_height() - 24.0,
             20.0,
@@ -375,10 +414,11 @@ async fn main() {
         );
         draw_text(
             format!(
-                "SEED {:08X}   DAY {:.1}   SPEED {:>5.1}   {} +{:.0}",
+                "SEED {:08X}   DAY {:.1}   SPEED {:>5.1}   ACCEL {:>5.1}   {} +{:.0}",
                 settings.seed,
                 system.elapsed_days,
                 ship.velocity.length(),
+                ship.acceleration.length(),
                 system.bodies[nearest_index].name,
                 altitude.max(0.0),
             ),
@@ -399,9 +439,36 @@ async fn main() {
             ship = Ship::launch(&system);
             view.center = ship.position;
             trail.clear();
+            trail.push_back(ship.position);
+            trail_sample_elapsed = 0.0;
+            visual_acceleration = Vec2::ZERO;
             target_index = usize::from(system.bodies.len() > 1);
         }
 
         next_frame().await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wasd_maps_to_eight_normalized_directions() {
+        let inputs = [
+            ((true, false, false, false), vec2(0.0, -1.0)),
+            ((true, false, true, false), vec2(1.0, -1.0)),
+            ((false, false, true, false), vec2(1.0, 0.0)),
+            ((false, true, true, false), vec2(1.0, 1.0)),
+            ((false, true, false, false), vec2(0.0, 1.0)),
+            ((false, true, false, true), vec2(-1.0, 1.0)),
+            ((false, false, false, true), vec2(-1.0, 0.0)),
+            ((true, false, false, true), vec2(-1.0, -1.0)),
+        ];
+
+        for ((up, down, right, left), expected) in inputs {
+            let actual = directional_input(up, down, right, left);
+            assert!(actual.distance(expected.normalize()) < f32::EPSILON);
+        }
     }
 }
