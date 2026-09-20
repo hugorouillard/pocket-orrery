@@ -12,6 +12,7 @@ Everything exists in one continuous 2D space. There are no travel screens or wor
 - Inertial ship flight with thrust, gravity, braking, and surface collisions
 - Smooth zoom from local terrain detail to the complete system
 - Target cycling and off-screen navigation markers
+- Timed velocity breadcrumbs and an acceleration wake for immediate motion feedback
 - Live generator workbench for planet count, spacing, eccentricity, and moons
 
 ## Run
@@ -26,8 +27,7 @@ The app requires a graphical Linux, macOS, or Windows session supported by Macro
 
 | Input | Action |
 | --- | --- |
-| `W` / `S` | Forward / reverse thrust |
-| `A` / `D` | Turn left / right |
+| `W` / `A` / `S` / `D` | Set one of eight thrust directions; the ship turns quickly to face it |
 | `Shift` | Inertial brake |
 | Hold `Space` | Match the selected world's velocity |
 | Mouse wheel | Zoom |

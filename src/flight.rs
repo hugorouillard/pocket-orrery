@@ -1,11 +1,11 @@
 //! Continuous ship movement, gravity, and surface collision handling.
 
 use crate::simulation::{DAYS_PER_SECOND, System};
-use macroquad::prelude::{Vec2, vec2};
+use macroquad::prelude::Vec2;
 
 pub const SHIP_RADIUS: f32 = 3.0;
 const THRUST: f32 = 42.0;
-const TURN_RATE: f32 = 2.7;
+const TURN_RATE: f32 = 12.0;
 const GRAVITY: f32 = 360.0;
 const MATCH_ACCELERATION: f32 = 64.0;
 const MAX_SPEED: f32 = 240.0;
@@ -13,8 +13,7 @@ const MAX_SPEED: f32 = 240.0;
 /// Per-frame pilot intent, separated from keyboard handling for testability.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Controls {
-    pub thrust: f32,
-    pub turn: f32,
+    pub thrust_direction: Vec2,
     pub brake: bool,
     pub match_velocity: Option<Vec2>,
 }
@@ -24,6 +23,7 @@ pub struct Controls {
 pub struct Ship {
     pub position: Vec2,
     pub velocity: Vec2,
+    pub acceleration: Vec2,
     pub heading: f32,
 }
 
@@ -41,6 +41,7 @@ impl Ship {
         Self {
             position: host.position + direction * (host.radius + 12.0),
             velocity: system.velocity_per_day(host_index) * DAYS_PER_SECOND,
+            acceleration: Vec2::ZERO,
             heading: direction.y.atan2(direction.x) - std::f32::consts::FRAC_PI_2,
         }
     }
@@ -48,9 +49,21 @@ impl Ship {
     /// Integrates pilot thrust and gravity, then resolves body intersections.
     pub fn update(&mut self, system: &System, controls: Controls, delta_seconds: f32) {
         let dt = delta_seconds.min(1.0 / 20.0);
-        self.heading += controls.turn * TURN_RATE * dt;
-        let forward = vec2(self.heading.cos(), self.heading.sin());
-        let acceleration = forward * controls.thrust * THRUST + self.gravity(system);
+        let previous_velocity = self.velocity;
+        let thrust_direction = controls.thrust_direction.normalize_or_zero();
+        if thrust_direction != Vec2::ZERO {
+            let target_heading = thrust_direction.y.atan2(thrust_direction.x);
+            let heading_delta = (target_heading - self.heading + std::f32::consts::PI)
+                .rem_euclid(std::f32::consts::TAU)
+                - std::f32::consts::PI;
+            self.heading += heading_delta.clamp(-TURN_RATE * dt, TURN_RATE * dt);
+        }
+        let thrust = if thrust_direction == Vec2::ZERO {
+            Vec2::ZERO
+        } else {
+            Vec2::new(self.heading.cos(), self.heading.sin()) * THRUST
+        };
+        let acceleration = thrust + self.gravity(system);
         self.velocity += acceleration * dt;
 
         if controls.brake {
@@ -63,6 +76,11 @@ impl Ship {
         self.velocity = self.velocity.clamp_length_max(MAX_SPEED);
         self.position += self.velocity * dt;
         self.resolve_collisions(system);
+        self.acceleration = if dt > 0.0 {
+            (self.velocity - previous_velocity) / dt
+        } else {
+            Vec2::ZERO
+        };
     }
 
     /// Finds the closest body by distance above its visible surface.
@@ -114,26 +132,92 @@ impl Ship {
 mod tests {
     use super::*;
     use crate::simulation::SystemSettings;
+    use macroquad::prelude::vec2;
 
-    /// Forward thrust should increase velocity along the ship's heading.
+    /// Directional thrust should work equally in all eight input directions.
     #[test]
-    fn thrust_accelerates_ship_forward() {
+    fn thrust_accelerates_ship_in_eight_directions() {
         let system = System::generate(SystemSettings::default());
-        let mut ship = Ship {
-            position: vec2(10_000.0, 10_000.0),
+        let directions = [
+            vec2(0.0, -1.0),
+            vec2(1.0, -1.0),
+            vec2(1.0, 0.0),
+            vec2(1.0, 1.0),
+            vec2(0.0, 1.0),
+            vec2(-1.0, 1.0),
+            vec2(-1.0, 0.0),
+            vec2(-1.0, -1.0),
+        ];
+
+        for direction in directions {
+            let position = vec2(10_000.0, 10_000.0);
+            let target_heading = direction.y.atan2(direction.x);
+            let gravity = Ship {
+                position,
+                velocity: Vec2::ZERO,
+                acceleration: Vec2::ZERO,
+                heading: target_heading,
+            }
+            .gravity(&system);
+            let mut ship = Ship {
+                position,
+                velocity: Vec2::ZERO,
+                acceleration: Vec2::ZERO,
+                heading: target_heading,
+            };
+            ship.update(
+                &system,
+                Controls {
+                    thrust_direction: direction,
+                    ..Controls::default()
+                },
+                0.01,
+            );
+
+            let thrust_velocity = ship.velocity - gravity * 0.01;
+            let expected_velocity = direction.normalize() * THRUST * 0.01;
+            assert!(thrust_velocity.distance(expected_velocity) < 0.0001);
+            assert!(
+                ship.acceleration
+                    .distance(direction.normalize() * THRUST + gravity)
+                    < 0.001
+            );
+            assert!((ship.heading - target_heading).abs() < f32::EPSILON);
+        }
+    }
+
+    #[test]
+    fn ship_turns_toward_thrust_without_snapping() {
+        let system = System::generate(SystemSettings::default());
+        let position = vec2(10_000.0, 10_000.0);
+        let gravity = Ship {
+            position,
             velocity: Vec2::ZERO,
+            acceleration: Vec2::ZERO,
+            heading: 0.0,
+        }
+        .gravity(&system);
+        let mut ship = Ship {
+            position,
+            velocity: Vec2::ZERO,
+            acceleration: Vec2::ZERO,
             heading: 0.0,
         };
+
         ship.update(
             &system,
             Controls {
-                thrust: 1.0,
+                thrust_direction: -Vec2::Y,
                 ..Controls::default()
             },
             0.01,
         );
 
-        assert!(ship.velocity.x > 0.0);
+        assert!((ship.heading + TURN_RATE * 0.01).abs() < f32::EPSILON);
+        assert!(ship.heading > -std::f32::consts::FRAC_PI_2);
+        let thrust_velocity = ship.velocity - gravity * 0.01;
+        let facing = Vec2::new(ship.heading.cos(), ship.heading.sin());
+        assert!(thrust_velocity.distance(facing * THRUST * 0.01) < 0.0001);
     }
 
     /// Collision resolution must leave the ship outside a body's surface.
@@ -144,6 +228,7 @@ mod tests {
         let mut ship = Ship {
             position: body.position,
             velocity: Vec2::ZERO,
+            acceleration: Vec2::ZERO,
             heading: 0.0,
         };
         ship.resolve_collisions(&system);
@@ -159,6 +244,7 @@ mod tests {
         let mut ship = Ship {
             position: vec2(10_000.0, 10_000.0),
             velocity: vec2(-24.0, 12.0),
+            acceleration: Vec2::ZERO,
             heading: 0.0,
         };
         let initial_error = ship.velocity.distance(target_velocity);
