@@ -25,30 +25,22 @@ The app requires a graphical Linux, macOS, or Windows session supported by Macro
 
 ## Controls
 
-| Input | Action |
-| --- | --- |
+| Input                 | Action                                                                |
+| --------------------- | --------------------------------------------------------------------- |
 | `W` / `A` / `S` / `D` | Set one of eight thrust directions; the ship turns quickly to face it |
-| `Shift` | Inertial brake |
-| Hold `Space` | Match the selected world's velocity |
-| Mouse wheel | Zoom |
-| `Tab` | Select the next world |
-| `P` | Pause simulation |
-| `R` | Generate the next seeded system |
+| `Shift`               | Inertial brake                                                        |
+| Hold `Space`          | Match the selected world's velocity                                   |
+| Mouse wheel           | Zoom                                                                  |
+| `Tab`                 | Select the next world                                                 |
+| `P`                   | Pause simulation                                                      |
+| `R`                   | Generate the next seeded system                                       |
 
 The workbench can rebuild the current seed after tuning parameters, making one-variable comparisons easy.
 
 ## Physics Model
 
-The model intentionally favors exploration over SI units. Orbital periods follow `T = 2π√(a³/GM)` with a shared toy gravitational constant. Elliptical positions solve Kepler's equation each frame. Moon orbits are generated inside a conservative fraction of the parent's Hill sphere. Ship gravity uses softened inverse-square attraction so tiny worlds remain landable at compressed radii.
+We're not reproducing scales 1:1 and real world constants because it's just impractical for what we're doing here.
 
-This is not an n-body simulation: celestial paths are analytic and do not perturb one another. That tradeoff keeps generated systems stable, legible, and reproducible while the ship remains fully dynamic.
+Orbital periods follow `T = 2π√(a³/GM)` with a toy gravitational constant. Elliptical positions solve Kepler's equation each frame. Moon orbits are generated inside a conservative fraction of the parent's Hill sphere. Ship gravity uses softened inverse-square attraction so tiny worlds remain landable at compressed radii.
 
-## Development
-
-```sh
-cargo fmt --check
-cargo test
-cargo clippy --all-targets -- -D warnings
-```
-
-The simulation and flight modules include unit tests for deterministic generation, structural settings, orbit closure, period ordering, thrust, and collision response.
+This is not an n-body simulation: celestial paths are analytic and do not perturb one another.
