@@ -31,7 +31,9 @@ impl View {
     fn update(&mut self, target: Vec2) {
         let (_, wheel) = mouse_wheel();
         if wheel != 0.0 {
-            self.zoom = (self.zoom * 1.18_f32.powf(wheel)).clamp(0.1, 8.0);
+            // Browsers report wheel movement in pixels rather than wheel steps.
+            let wheel_step = wheel.clamp(-1.0, 1.0);
+            self.zoom = (self.zoom * 1.18_f32.powf(wheel_step)).clamp(0.1, 8.0);
         }
         let follow = 1.0 - (-6.0 * get_frame_time()).exp();
         self.center = self.center.lerp(target, follow);
