@@ -1,21 +1,20 @@
 # Solanum
 
-Solanum is a small procedural solar-system playground written in Rust. It compresses distance, time, and gravity into a toy scale while keeping the relationships that make orbits feel coherent: outer worlds take longer to orbit, moons use their parent's mass, eccentric bodies move along Kepler ellipses, and a launched ship inherits its world's velocity.
+This is a small solar system simulation I made after playing [*Outer Wilds*](https://www.outerwilds.com/). If you've never heard of it, it's a game about exploring a small solar system and uncovering its story. What makes the game especially fascinating is that its universe isn't just a collection of scripted set pieces: it's all one big physics simulation, and the things that happen emerge from that.
 
-Everything exists in one continuous 2D space. There are no travel screens or world transitions.
+I had also been wanting to experiment with Rust's [Macroquad](https://macroquad.rs/), so building my own miniature solar system felt like a good opportunity to do that.
 
-## Features
+[Play it in your browser.](https://hugorouillard.github.io/solanum/)
 
-- Deterministic systems identified by a visible seed
-- Rocky planets, gas giants, moons, atmospheres, rings, and surface details
-- Nested, low-eccentricity Kepler orbits with Hill-sphere-limited moons
-- Inertial ship flight with thrust, gravity, braking, and surface collisions
-- Smooth zoom from local terrain detail to the complete system
-- Target cycling and off-screen navigation markers
-- Timed velocity breadcrumbs and an acceleration wake for immediate motion feedback
-- Live generator workbench for planet count, spacing, eccentricity, and moons
+![The Solanum simulation](assets/screencap.png)
 
-## Run
+## Physics
+
+Everything exists in one continuous space. Planets and moons follow nested Keplerian orbits, while the ship moves inertially under thrust and the combined gravity of every body. It starts with the velocity of the world it launches from and can collide with planetary surfaces.
+
+The distances, times, masses, and gravitational constants are deliberately compressed for practicality. Orbital periods follow `T = 2π√(a³/GM)`, elliptical positions are found by solving Kepler's equation, and ship gravity uses softened inverse-square attraction.
+
+## Run locally
 
 ```sh
 cargo run --release
@@ -27,20 +26,10 @@ The app requires a graphical Linux, macOS, or Windows session supported by Macro
 
 | Input                 | Action                                                                |
 | --------------------- | --------------------------------------------------------------------- |
-| `W` / `A` / `S` / `D` | Set one of eight thrust directions; the ship turns quickly to face it |
+| `W` / `A` / `S` / `D` | Thrust |
 | `Shift`               | Inertial brake                                                        |
 | Hold `Space`          | Match the selected world's velocity                                   |
 | Mouse wheel           | Zoom                                                                  |
 | `Tab`                 | Select the next world                                                 |
 | `P`                   | Pause simulation                                                      |
 | `R`                   | Generate the next seeded system                                       |
-
-The workbench can rebuild the current seed after tuning parameters, making one-variable comparisons easy.
-
-## Physics Model
-
-We're not reproducing scales 1:1 and real world constants because it's just impractical for what we're doing here.
-
-Orbital periods follow `T = 2π√(a³/GM)` with a toy gravitational constant. Elliptical positions solve Kepler's equation each frame. Moon orbits are generated inside a conservative fraction of the parent's Hill sphere. Ship gravity uses softened inverse-square attraction so tiny worlds remain landable at compressed radii.
-
-This is not an n-body simulation: celestial paths are analytic and do not perturb one another.
