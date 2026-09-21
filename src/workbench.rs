@@ -137,15 +137,12 @@ mod tests {
     }
 
     #[test]
-    fn continuous_defaults_are_centered_in_their_ranges() {
+    fn continuous_defaults_use_expected_range_positions() {
         let defaults = SystemSettings::default();
         let tolerance = f32::EPSILON;
 
         assert!((defaults.spacing - (MIN_SPACING + MAX_SPACING) / 2.0).abs() <= tolerance);
-        assert!(
-            (defaults.eccentricity - (MIN_ECCENTRICITY + MAX_ECCENTRICITY) / 2.0).abs()
-                <= tolerance
-        );
+        assert_eq!(defaults.eccentricity, MIN_ECCENTRICITY);
         assert!(
             (defaults.moon_abundance - (MIN_MOON_ABUNDANCE + MAX_MOON_ABUNDANCE) / 2.0).abs()
                 <= tolerance

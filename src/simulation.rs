@@ -87,7 +87,7 @@ impl Default for SystemSettings {
             seed: 0x5EED_CAFE,
             planet_count: 5,
             spacing: 1.0,
-            eccentricity: 0.16,
+            eccentricity: 0.0,
             moon_abundance: 0.65,
         }
     }
