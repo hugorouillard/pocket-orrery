@@ -1,6 +1,6 @@
 # Solanum
 
-A small solar system simulation I made after playing [*Outer Wilds*](https://www.outerwilds.com/). If you've never heard of it, it's a game about exploring a small solar system and uncovering its story. What makes the game especially fascinating is that its universe isn't just a collection of scripted set pieces: it's all one big physics simulation, and the things that happen emerge from that.
+A small solar system simulation I made after playing [*Outer Wilds*](https://www.outerwilds.com/). If you've never heard of it, it's a game about exploring a small solar system and uncovering its story. What makes the game especially fascinating (to me at least) is that its universe isn't just a collection of scripted set pieces: it's all one big physics simulation, and the things that happen emerge from that.
 
 I had also been wanting to experiment with Rust's [Macroquad](https://macroquad.rs/), so building my own miniature solar system felt like a good opportunity to do that.
 
