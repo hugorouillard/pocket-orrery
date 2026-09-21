@@ -1,6 +1,6 @@
-# Pocket Orrery
+# Solanum
 
-Pocket Orrery is a small procedural solar-system playground written in Rust. It compresses distance, time, and gravity into a toy scale while keeping the relationships that make orbits feel coherent: outer worlds take longer to orbit, moons use their parent's mass, eccentric bodies move along Kepler ellipses, and a launched ship inherits its world's velocity.
+Solanum is a small procedural solar-system playground written in Rust. It compresses distance, time, and gravity into a toy scale while keeping the relationships that make orbits feel coherent: outer worlds take longer to orbit, moons use their parent's mass, eccentric bodies move along Kepler ellipses, and a launched ship inherits its world's velocity.
 
 Everything exists in one continuous 2D space. There are no travel screens or world transitions.
 

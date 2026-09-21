@@ -1,4 +1,4 @@
-//! Pocket Orrery's application loop and immediate-mode renderer.
+//! Solanum's application loop and immediate-mode renderer.
 
 mod flight;
 mod simulation;
@@ -331,7 +331,7 @@ fn draw_navigation(
 /// Configures a resizable antialiased desktop window.
 fn window_conf() -> Conf {
     Conf {
-        window_title: "Pocket Orrery".to_owned(),
+        window_title: "Solanum".to_owned(),
         window_width: 1280,
         window_height: 800,
         window_resizable: true,
