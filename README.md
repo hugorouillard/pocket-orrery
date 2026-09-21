@@ -22,6 +22,20 @@ cargo run --release
 
 The app requires a graphical Linux, macOS, or Windows session supported by Macroquad.
 
+## Web Demo
+
+Install the WebAssembly target and build the static site:
+
+```sh
+rustup target add wasm32-unknown-unknown
+./scripts/build-web.sh
+python3 -m http.server --directory dist 8000
+```
+
+Open <http://localhost:8000>. The demo must be served over HTTP rather than opened directly from the filesystem.
+
+The `Web demo` GitHub Actions workflow deploys `dist` to GitHub Pages after a push to `main`, or when run manually. Once Pages is configured to use GitHub Actions, the public demo is available at <https://hugorouillard.github.io/pocket-orrery/>.
+
 ## Controls
 
 | Input                 | Action                                                                |

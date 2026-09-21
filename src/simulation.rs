@@ -309,7 +309,7 @@ fn rotate(point: Vec2, angle: f32) -> Vec2 {
 
 /// Names the small generated moon sets without carrying a formatter.
 fn roman_numeral(index: usize) -> &'static str {
-    ["I", "II", "III"][index]
+    ["I", "II", "III", "IV"][index]
 }
 
 /// Produces a short pronounceable fragment for generated labels.
@@ -348,7 +348,7 @@ impl Random {
 
     /// Samples an array index below the provided length.
     fn index(&mut self, length: usize) -> usize {
-        self.next_u64() as usize % length
+        (self.next_u64() % length as u64) as usize
     }
 
     /// Returns true with the supplied probability.
@@ -375,6 +375,18 @@ mod tests {
             assert_eq!(left.radius, right.radius);
             assert_eq!(left.position, right.position);
         }
+    }
+
+    /// Seeded choices must not change when usize is 32-bit in WebAssembly.
+    #[test]
+    fn random_index_uses_the_full_sample() {
+        assert_eq!(Random::new(123).index(12), 7);
+    }
+
+    /// Maximum moon abundance can produce a fourth moon around a gas giant.
+    #[test]
+    fn fourth_moon_has_a_name() {
+        assert_eq!(roman_numeral(3), "IV");
     }
 
     /// More distant circular orbits must take longer than inner ones.
